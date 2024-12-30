@@ -1,0 +1,26 @@
+{
+  "name": "obsidian-asana-plugin",
+  "version": "1.0.0",
+  "description": "Asana integration for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "keywords": ["obsidian", "asana", "plugin"],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "@types/asana": "^0.18.12",
+    "obsidian": "latest",
+    "esbuild": "0.17.3",
+    "typescript": "4.7.4",
+    "tslib": "2.4.0",
+    "builtin-modules": "^3.3.0"
+  },
+  "dependencies": {
+    "asana": "^1.0.1"
+  }
+}
