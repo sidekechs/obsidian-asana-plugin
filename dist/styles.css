@@ -1,0 +1,47 @@
+/* Project Selection Modal */
+.project-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 10px 0;
+}
+
+.project-item {
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.project-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+/* Task File */
+.task-metadata {
+    padding: 10px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    background-color: var(--background-modifier-form-field);
+}
+
+.task-comments {
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.task-comment {
+    margin: 10px 0;
+    padding: 8px;
+    border-radius: 4px;
+    background-color: var(--background-modifier-form-field);
+}
+
+.task-comment-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
