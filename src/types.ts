@@ -16,8 +16,8 @@ export interface AsanaTask {
 export interface AsanaCustomField {
     gid: string;
     name: string;
-    display_value: string | null;
     type: string;
+    display_value: string;
 }
 
 export interface AsanaUser {
@@ -41,18 +41,24 @@ export interface AsanaWorkspace {
     name: string;
 }
 
+export interface AsanaTaskData {
+    name: string;
+    notes: string;
+    completed: boolean;
+    due_on: string | null;
+}
+
 // Plugin Types
 export interface AsanaPluginSettings {
     asanaAccessToken: string;
     taskFolder: string;
     templateFile: string;
-    syncInterval: number; // in minutes
-    defaultProject?: string;
+    syncInterval: number;
 }
 
 export const DEFAULT_SETTINGS: AsanaPluginSettings = {
     asanaAccessToken: '',
-    taskFolder: 'Asana Tasks',
+    taskFolder: 'Tasks',
     templateFile: '',
     syncInterval: 5
 };

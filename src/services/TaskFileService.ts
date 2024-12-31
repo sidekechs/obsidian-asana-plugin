@@ -1,5 +1,5 @@
 import { TFile, Vault, getLinkpath } from 'obsidian';
-import { AsanaTask } from '../types';
+import { AsanaTask, AsanaTaskData } from '../types';
 
 interface TaskData {
     completed: boolean;
@@ -40,7 +40,7 @@ export class TaskFileService {
     }
 
     private sanitizeFileName(name: string): string {
-        return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 200);
+        return name.replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
     private createTaskFrontmatter(task: AsanaTask): string {
@@ -59,11 +59,16 @@ export class TaskFileService {
             }, {} as Record<string, string>)
         };
 
-        return '---\n' + 
-               Object.entries(frontmatterObj)
-                     .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
-                     .join('\n') + 
-               '\n---';
+        const frontmatterStr = Object.entries(frontmatterObj)
+            .map(([key, value]) => {
+                if (Array.isArray(value)) {
+                    return `${key}:\n${value.map(v => `  - ${JSON.stringify(v)}`).join('\n')}`;
+                }
+                return `${key}: ${JSON.stringify(value)}`;
+            })
+            .join('\n');
+
+        return `---\n${frontmatterStr}\n---`;
     }
 
     private createTaskContent(task: AsanaTask, frontmatter: string): string {
@@ -71,13 +76,18 @@ export class TaskFileService {
     }
 
     extractTaskData(content: string, metadata: any): TaskData {
-        const sections = content.split('---');
-        const taskContent = sections[2]?.split('## Comments')[0]?.trim() || '';
+        // Extract name from first heading
+        const nameMatch = content.match(/^# (.+)$/m);
+        const name = nameMatch ? nameMatch[1].trim() : '';
+
+        // Extract notes (everything between the first heading and "## Comments")
+        const notesMatch = content.match(/^# .+\n\n([\s\S]+?)(?=\n\n## Comments|$)/m);
+        const notes = notesMatch ? notesMatch[1].trim() : '';
 
         return {
+            name,
+            notes,
             completed: metadata.status === 'completed',
-            name: metadata.name || '',
-            notes: taskContent,
             due_on: metadata.due_date || null
         };
     }
