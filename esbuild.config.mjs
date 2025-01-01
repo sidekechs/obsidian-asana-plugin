@@ -1,7 +1,8 @@
 import esbuild from "esbuild";
 import process from "process";
+import fs from "fs";
+import path from "path";
 import builtins from "builtin-modules";
-import fs from "fs-extra";
 
 const banner =
 `/*
@@ -10,24 +11,25 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = (process.argv[2] === "production");
+const prod = process.argv[2] === 'production';
+const distPath = process.argv[3] || 'dist';
 
 // Create dist directory if it doesn't exist
-if (!fs.existsSync("dist")) {
-    fs.mkdirSync("dist");
+if (!fs.existsSync(distPath)) {
+    fs.mkdirSync(distPath, { recursive: true });
 }
 
 // Copy manifest and styles
-fs.copyFileSync("manifest.json", "dist/manifest.json");
+fs.copyFileSync("manifest.json", path.join(distPath, "manifest.json"));
 if (fs.existsSync("styles.css")) {
-    fs.copyFileSync("styles.css", "dist/styles.css");
+    fs.copyFileSync("styles.css", path.join(distPath, "styles.css"));
 }
 
-const context = await esbuild.context({
+const buildOptions = {
     banner: {
         js: banner,
     },
-    entryPoints: ["src/main.ts"],
+    entryPoints: ["src/main.tsx"],
     bundle: true,
     external: [
         "obsidian",
@@ -49,13 +51,19 @@ const context = await esbuild.context({
     logLevel: "info",
     sourcemap: prod ? false : "inline",
     treeShaking: true,
-    outfile: "dist/main.js",
+    outfile: path.join(distPath, "main.js"),
+    loader: {
+        ".tsx": "tsx",
+        ".ts": "tsx",
+    },
     allowOverwrite: true
-});
+};
 
 if (prod) {
-    await context.rebuild();
+    await esbuild.build(buildOptions);
     process.exit(0);
 } else {
-    await context.watch();
+    const ctx = await esbuild.context(buildOptions);
+    await ctx.watch();
+    console.log('Watching for changes...');
 }

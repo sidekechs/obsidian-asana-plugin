@@ -43,12 +43,22 @@ export class AsanaService {
 
     async getProjects(workspaceId: string): Promise<AsanaProject[]> {
         try {
-            const projects = await this.client.projects.findAll({
-                workspace: workspaceId,
-                opt_fields: 'name,archived'
-            });
+            const allProjects: any[] = [];
+            let offset: string | undefined;
 
-            return projects.data
+            do {
+                const response = await this.client.projects.findAll({
+                    workspace: workspaceId,
+                    opt_fields: 'name,archived',
+                    limit: 100,
+                    ...(offset ? { offset } : {})
+                });
+
+                allProjects.push(...response.data);
+                offset = response._response.next_page?.offset;
+            } while (offset);
+
+            return allProjects
                 .filter((p: any) => !p.archived)
                 .map((p: any) => ({
                     gid: p.gid,
@@ -62,11 +72,24 @@ export class AsanaService {
 
     async getTasksForProject(projectId: string): Promise<AsanaTask[]> {
         try {
-            const tasks = await this.client.tasks.findByProject(projectId, {
-                opt_fields: 'name,notes,due_on,completed,custom_fields,assignee,projects,tags,workspace,permalink_url'
-            });
-            
-            return tasks.data.map((t: any) => ({
+            const allTasks: any[] = [];
+            let offset: string | undefined;
+
+            do {
+                const response = await this.client.tasks.findByProject(projectId, {
+                    opt_fields: 'name,notes,due_on,completed,custom_fields,assignee,projects,tags,workspace,permalink_url',
+                    limit: 100,
+                    ...(offset ? { offset } : {})
+                } as any); // Type assertion needed for pagination params
+
+                // Filter incomplete tasks on our side
+                const incompleteTasks = response.data.filter((t: any) => !t.completed);
+                allTasks.push(...incompleteTasks);
+                
+                offset = response._response.next_page?.offset;
+            } while (offset);
+
+            return allTasks.map((t: any) => ({
                 gid: t.gid,
                 name: t.name,
                 notes: t.notes,
@@ -114,16 +137,44 @@ export class AsanaService {
 
     async getTaskComments(taskId: string) {
         try {
-            const stories = await this.client.stories.findByTask(taskId);
-            return stories.data
-                .filter((story: any) => story.type === 'comment')
-                .map((story: any) => ({
-                    author: story.created_by.name,
-                    timestamp: new Date(story.created_at),
-                    text: story.text
-                }));
+            const allComments: any[] = [];
+            let offset: string | undefined;
+
+            do {
+                const stories = await this.client.stories.findByTask(taskId, {
+                    opt_fields: 'created_by.name,created_at,text,type,resource_subtype',
+                    limit: 100,
+                    ...(offset ? { offset } : {})
+                } as any);
+
+                const comments = stories.data
+                    .filter((story: any) => story.type === 'comment')
+                    .map((story: any) => ({
+                        gid: story.gid,
+                        author: story.created_by.name,
+                        timestamp: new Date(story.created_at),
+                        text: story.text,
+                        resource_subtype: story.resource_subtype
+                    }));
+
+                allComments.push(...comments);
+                offset = stories._response.next_page?.offset;
+            } while (offset);
+
+            return allComments.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
         } catch (error) {
             console.error('Error fetching task comments:', error);
+            throw error;
+        }
+    }
+
+    async addComment(taskId: string, text: string) {
+        try {
+            await this.client.stories.createOnTask(taskId, {
+                text: text
+            });
+        } catch (error) {
+            console.error('Error adding comment:', error);
             throw error;
         }
     }

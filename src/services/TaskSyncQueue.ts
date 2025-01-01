@@ -9,6 +9,13 @@ export class TaskSyncQueue {
         await this.processQueue();
     }
 
+    async enqueue(task: () => Promise<void>) {
+        // For tasks that don't have an associated file, use a timestamp as key
+        const key = Date.now().toString();
+        this.taskQueue.set(key, task);
+        await this.processQueue();
+    }
+
     private async processQueue() {
         if (this.processingQueue || this.taskQueue.size === 0) return;
 
@@ -17,7 +24,11 @@ export class TaskSyncQueue {
         this.taskQueue.clear();
 
         for (const task of tasks) {
-            await task();
+            try {
+                await task();
+            } catch (error) {
+                console.error('Error processing task:', error);
+            }
         }
 
         this.processingQueue = false;

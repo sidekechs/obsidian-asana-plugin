@@ -17,7 +17,10 @@ jest.mock('asana', () => ({
                     data: [
                         { gid: 'project1', name: 'Project 1', archived: false },
                         { gid: 'project2', name: 'Project 2', archived: true }
-                    ]
+                    ],
+                    _response: {
+                        next_page: null
+                    }
                 })
             },
             tasks: {
@@ -69,6 +72,37 @@ describe('AsanaService', () => {
                 gid: 'project1',
                 name: 'Project 1'
             });
+        });
+
+        it('should handle pagination', async () => {
+            const asanaClient = require('asana').Client.create();
+            asanaClient.projects.findAll
+                .mockResolvedValueOnce({
+                    data: [
+                        { gid: 'project1', name: 'Project 1', archived: false },
+                        { gid: 'project2', name: 'Project 2', archived: true }
+                    ],
+                    _response: {
+                        next_page: { offset: 'page2' }
+                    }
+                })
+                .mockResolvedValueOnce({
+                    data: [
+                        { gid: 'project3', name: 'Project 3', archived: false },
+                        { gid: 'project4', name: 'Project 4', archived: false }
+                    ],
+                    _response: {
+                        next_page: null
+                    }
+                });
+
+            const projects = await service.getProjects('workspace123');
+            expect(projects).toHaveLength(3);
+            expect(projects).toEqual([
+                { gid: 'project1', name: 'Project 1' },
+                { gid: 'project3', name: 'Project 3' },
+                { gid: 'project4', name: 'Project 4' }
+            ]);
         });
     });
 

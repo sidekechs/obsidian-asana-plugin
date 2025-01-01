@@ -39,6 +39,14 @@ describe('AsanaPlugin', () => {
         (plugin as any).taskFileService = mockTaskFileService;
         (plugin as any).taskSyncQueue = mockTaskSyncQueue;
 
+        const mockSettings = {
+            asanaAccessToken: 'test-token',
+            taskFolder: 'Tasks',
+            templateFile: '',
+            syncInterval: 5,
+            autoSaveInterval: 30
+        };
+        plugin.settings = mockSettings;
         await plugin.loadSettings();
     });
 
@@ -46,7 +54,7 @@ describe('AsanaPlugin', () => {
         it('should initialize plugin correctly', async () => {
             await plugin.onload();
             expect(plugin.settings).toBeDefined();
-            expect(plugin.settings.asanaAccessToken).toBe('');
+            expect(plugin.settings.asanaAccessToken).toBe('test-token');
             expect(plugin.settings.taskFolder).toBe('Tasks');
         });
     });
@@ -57,7 +65,8 @@ describe('AsanaPlugin', () => {
                 asanaAccessToken: 'new-token',
                 taskFolder: 'New Tasks',
                 templateFile: 'template.md',
-                syncInterval: 10
+                syncInterval: 10,
+                autoSaveInterval: 60
             };
             plugin.settings = newSettings;
             await plugin.saveSettings();

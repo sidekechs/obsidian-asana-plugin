@@ -1,4 +1,3 @@
-// Asana Types
 export interface AsanaTask {
     gid: string;
     name: string;
@@ -47,18 +46,3 @@ export interface AsanaTaskData {
     completed: boolean;
     due_on: string | null;
 }
-
-// Plugin Types
-export interface AsanaPluginSettings {
-    asanaAccessToken: string;
-    taskFolder: string;
-    templateFile: string;
-    syncInterval: number;
-}
-
-export const DEFAULT_SETTINGS: AsanaPluginSettings = {
-    asanaAccessToken: '',
-    taskFolder: 'Tasks',
-    templateFile: '',
-    syncInterval: 5
-};
