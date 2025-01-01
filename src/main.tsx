@@ -24,6 +24,7 @@ import { TaskSyncQueue } from './services/TaskSyncQueue';
 import { TaskSyncService } from './services/TaskSyncService';
 import { ProjectSelector } from './components/ProjectSelector';
 import { TaskComments } from './components/TaskComments';
+import { CreateTaskModal } from './ui/CreateTaskModal';
 
 class ProjectModal extends Modal {
     private projects: AsanaProject[];
@@ -258,6 +259,71 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                     return;
                 }
                 new CommentsModal(this.app, metadata.asana_gid, this.asanaService).open();
+            }
+        });
+
+        // Create task from line command
+        this.addCommand({
+            id: 'create-task-from-line',
+            name: 'Create Asana task from current line',
+            hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'a' }],
+            editorCallback: (editor) => {
+                const currentLine = editor.getCursor().line;
+                const line = editor.getLine(currentLine);
+                
+                // Check if line is a task
+                if (!line.trim().startsWith('- [ ]')) {
+                    new Notice('Current line is not a task');
+                    return;
+                }
+
+                // Extract task name (remove checkbox and trim)
+                const taskName = line.replace(/^-\s*\[\s*\]\s*/, '').trim();
+
+                // Get the next lines until we hit an empty line or another list item
+                let description = '';
+                let nextLine = currentLine + 1;
+                while (nextLine < editor.lineCount()) {
+                    const nextLineText = editor.getLine(nextLine);
+                    if (!nextLineText.trim() || nextLineText.trim().startsWith('-')) {
+                        break;
+                    }
+                    if (description) description += '\n';
+                    description += nextLineText.trim();
+                    nextLine++;
+                }
+                
+                new CreateTaskModal(
+                    this.app,
+                    this.asanaService,
+                    taskName,
+                    async (data) => {
+                        try {
+                            const task = await this.asanaService.createTask({
+                                name: data.name,
+                                notes: data.notes || description, // Use form description or indented text
+                                projectId: data.projectId,
+                                assigneeId: data.assigneeId,
+                                dueDate: data.dueDate,
+                                priority: data.priority
+                            });
+
+                            // Update the line to show it's been created in Asana
+                            const priorityEmoji = {
+                                high: '🔴',
+                                medium: '🟡',
+                                low: '🟢'
+                            }[data.priority || 'medium'];
+
+                            const newLine = `- [x] ${data.name} ${priorityEmoji} 🔗 ${task.permalink_url}`;
+                            editor.setLine(currentLine, newLine);
+                            new Notice('Task created in Asana');
+                        } catch (error) {
+                            console.error('Error creating task:', error);
+                            new Notice('Failed to create task in Asana');
+                        }
+                    }
+                ).open();
             }
         });
     }

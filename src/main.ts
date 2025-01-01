@@ -299,25 +299,18 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
 
     async fetchAsanaProjects() {
         try {
-            const user = await this.asanaService.getCurrentUser();
-            const projects = await this.asanaService.getProjects(user.workspaces[0].gid);
-
-            if (!projects.length) {
-                new Notice('No active projects found');
-                return;
-            }
-
-            new ProjectSelectionModal(
+            const projects = await this.asanaService.getProjects();
+            const modal = new ProjectSelectionModal(
                 this.app,
                 projects,
                 async (project: AsanaProject) => {
                     await this.fetchTasksForProject(project);
                 }
-            ).open();
-
+            );
+            modal.open();
         } catch (error) {
             console.error('Error fetching projects:', error);
-            new Notice('Failed to fetch projects. Check console for details.');
+            new Notice('Failed to fetch projects');
         }
     }
 

@@ -42,6 +42,11 @@ jest.mock('asana', () => ({
                     ]
                 }),
                 update: jest.fn().mockResolvedValue({})
+            },
+            workspaces: {
+                findAll: jest.fn().mockResolvedValue({
+                    data: [{ gid: 'workspace1' }]
+                })
             }
         })
     }
@@ -49,9 +54,11 @@ jest.mock('asana', () => ({
 
 describe('AsanaService', () => {
     let service: AsanaService;
+    let mockClient: any;
 
     beforeEach(() => {
         service = new AsanaService('test-token');
+        mockClient = require('asana').Client.create();
     });
 
     describe('getCurrentUser', () => {
@@ -65,44 +72,45 @@ describe('AsanaService', () => {
     });
 
     describe('getProjects', () => {
-        it('should fetch and filter non-archived projects', async () => {
-            const projects = await service.getProjects('workspace123');
-            expect(projects).toHaveLength(1);
-            expect(projects[0]).toEqual({
-                gid: 'project1',
-                name: 'Project 1'
+        it('should fetch projects successfully', async () => {
+            const mockProjects = [
+                { gid: '1', name: 'Project 1' },
+                { gid: '2', name: 'Project 2' }
+            ];
+            mockClient.projects.findAll.mockResolvedValue({
+                data: mockProjects,
+                _response: { next_page: null }
             });
+            mockClient.workspaces.findAll.mockResolvedValue({
+                data: [{ gid: 'workspace1' }]
+            });
+
+            const projects = await service.getProjects();
+            expect(projects).toHaveLength(2);
+            expect(projects[0].gid).toBe('1');
+            expect(projects[1].gid).toBe('2');
         });
 
         it('should handle pagination', async () => {
-            const asanaClient = require('asana').Client.create();
-            asanaClient.projects.findAll
+            const mockProjects1 = [{ gid: '1', name: 'Project 1' }];
+            const mockProjects2 = [{ gid: '2', name: 'Project 2' }];
+            mockClient.projects.findAll
                 .mockResolvedValueOnce({
-                    data: [
-                        { gid: 'project1', name: 'Project 1', archived: false },
-                        { gid: 'project2', name: 'Project 2', archived: true }
-                    ],
-                    _response: {
-                        next_page: { offset: 'page2' }
-                    }
+                    data: mockProjects1,
+                    _response: { next_page: { offset: 'offset1' } }
                 })
                 .mockResolvedValueOnce({
-                    data: [
-                        { gid: 'project3', name: 'Project 3', archived: false },
-                        { gid: 'project4', name: 'Project 4', archived: false }
-                    ],
-                    _response: {
-                        next_page: null
-                    }
+                    data: mockProjects2,
+                    _response: { next_page: null }
                 });
+            mockClient.workspaces.findAll.mockResolvedValue({
+                data: [{ gid: 'workspace1' }]
+            });
 
-            const projects = await service.getProjects('workspace123');
-            expect(projects).toHaveLength(3);
-            expect(projects).toEqual([
-                { gid: 'project1', name: 'Project 1' },
-                { gid: 'project3', name: 'Project 3' },
-                { gid: 'project4', name: 'Project 4' }
-            ]);
+            const projects = await service.getProjects();
+            expect(projects).toHaveLength(2);
+            expect(projects[0].gid).toBe('1');
+            expect(projects[1].gid).toBe('2');
         });
     });
 
@@ -128,8 +136,7 @@ describe('AsanaService', () => {
             };
             await service.updateTask('task1', updateData);
             // Verify that update was called with correct parameters
-            const asanaClient = require('asana').Client.create();
-            expect(asanaClient.tasks.update).toHaveBeenCalledWith('task1', updateData);
+            expect(mockClient.tasks.update).toHaveBeenCalledWith('task1', updateData);
         });
     });
 });

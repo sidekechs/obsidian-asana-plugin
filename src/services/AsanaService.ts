@@ -41,15 +41,20 @@ export class AsanaService {
         }
     }
 
-    async getProjects(workspaceId: string): Promise<AsanaProject[]> {
+    async getProjects(): Promise<AsanaProject[]> {
         try {
+            const workspaces = await this.client.workspaces.findAll();
+            const workspace = workspaces.data[0];
+            if (!workspace) {
+                throw new Error('No workspace found');
+            }
+
             const allProjects: any[] = [];
             let offset: string | undefined;
 
             do {
                 const response = await this.client.projects.findAll({
-                    workspace: workspaceId,
-                    opt_fields: 'name,archived',
+                    workspace: workspace.gid,
                     limit: 100,
                     ...(offset ? { offset } : {})
                 });
@@ -58,12 +63,12 @@ export class AsanaService {
                 offset = response._response.next_page?.offset;
             } while (offset);
 
-            return allProjects
-                .filter((p: any) => !p.archived)
-                .map((p: any) => ({
-                    gid: p.gid,
-                    name: p.name
-                }));
+            return allProjects.map((p: any) => ({
+                gid: p.gid,
+                name: p.name,
+                color: p.color,
+                notes: p.notes
+            }));
         } catch (error) {
             console.error('Error fetching projects:', error);
             throw error;
@@ -175,6 +180,69 @@ export class AsanaService {
             });
         } catch (error) {
             console.error('Error adding comment:', error);
+            throw error;
+        }
+    }
+
+    async getProjectMembers(projectId: string) {
+        try {
+            const workspaces = await this.client.workspaces.findAll();
+            const workspace = workspaces.data[0];
+            if (!workspace) {
+                throw new Error('No workspace found');
+            }
+            const response = await this.client.users.findByWorkspace(workspace.gid);
+            return response.data.map((user: any) => ({
+                gid: user.gid,
+                name: user.name
+            }));
+        } catch (error) {
+            console.error('Error fetching workspace members:', error);
+            throw error;
+        }
+    }
+
+    async createTask(data: {
+        name: string;
+        notes?: string;
+        projectId?: string;
+        assigneeId?: string;
+        dueDate?: string;
+        priority?: 'high' | 'medium' | 'low';
+    }) {
+        try {
+            const taskData: any = {
+                name: data.name,
+                notes: data.notes || '',
+                assignee: data.assigneeId,
+                due_on: data.dueDate,
+                workspace: (await this.client.workspaces.findAll()).data[0].gid
+            };
+
+            if (data.projectId) {
+                taskData.projects = [data.projectId];
+            }
+
+            // Create the task first
+            const task = await this.client.tasks.create(taskData);
+
+            // If priority is set, update it separately
+            if (data.priority && task.gid) {
+                try {
+                    await this.client.tasks.update(task.gid, {
+                        custom_fields: {
+                            'Priority': data.priority.charAt(0).toUpperCase() + data.priority.slice(1)
+                        }
+                    });
+                } catch (error) {
+                    console.warn('Could not set priority:', error);
+                    // Don't fail the whole operation if just priority setting fails
+                }
+            }
+
+            return task;
+        } catch (error) {
+            console.error('Error creating task:', error);
             throw error;
         }
     }
