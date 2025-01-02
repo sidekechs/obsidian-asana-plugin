@@ -108,7 +108,7 @@ export class TaskFileService {
         content += `# ${task.name || 'Untitled Task'}\n\n`;
         
         if (task.notes) {
-            content += `## Description\n${task.notes}\n\n`;
+            content += `${task.notes}\n\n`;
         }
 
         return content;
