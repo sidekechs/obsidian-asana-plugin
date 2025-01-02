@@ -301,23 +301,48 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                         try {
                             const task = await this.asanaService.createTask({
                                 name: data.name,
-                                notes: data.notes || description, // Use form description or indented text
+                                notes: data.notes || description,
                                 projectId: data.projectId,
                                 assigneeId: data.assigneeId,
                                 dueDate: data.dueDate,
                                 priority: data.priority
                             });
 
-                            // Update the line to show it's been created in Asana
+                            // Get project and workspace info
+                            const project = await this.asanaService.getProject(data.projectId);
+                            const workspace = await this.asanaService.getCurrentUser();
+                            
+                            // Create a complete task object for file creation
+                            const completeTask = {
+                                ...task,
+                                workspace: workspace.workspaces[0],
+                                projects: [project]
+                            };
+
+                            // Create the local file
+                            const taskFolderPath = this.settings.taskFolder || 'Tasks';
+                            const fileName = await this.taskFileService.createTaskFile(
+                                completeTask,
+                                project.name,
+                                taskFolderPath,
+                                this.settings.templateFile
+                            );
+
                             const priorityEmoji = {
                                 high: '🔴',
                                 medium: '🟡',
                                 low: '🟢'
                             }[data.priority || 'medium'];
 
-                            const newLine = `- [x] ${data.name} ${priorityEmoji} 🔗 ${task.permalink_url}`;
+                            // Create Obsidian wiki-link with escaped task name and path
+                            const escapedName = encodeURIComponent(data.name);
+                            const escapedPath = fileName.replace(/\.md$/, '').split('/').map(part => encodeURIComponent(part)).join('/');
+                            const wikiLink = `[${data.name} ${priorityEmoji}](${escapedPath})`;
+                            const browserLink = `[Open in Browser](${task.permalink_url})`;
+
+                            const newLine = `- [x] ${wikiLink} | ${browserLink}`;
                             editor.setLine(currentLine, newLine);
-                            new Notice('Task created in Asana');
+                            new Notice('Task created in Asana and local file created');
                         } catch (error) {
                             console.error('Error creating task:', error);
                             new Notice('Failed to create task in Asana');
@@ -346,12 +371,12 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                             await this.taskFileService.createTaskFile(
                                 task,
                                 project.name,
-                                this.settings.taskFolder,
+                                this.settings.taskFolder || 'Tasks',
                                 this.settings.templateFile
                             );
                         });
                     }
-                    new Notice(`Tasks imported to "${this.settings.taskFolder}/${project.name}"`);
+                    new Notice(`Tasks imported to "${this.settings.taskFolder || 'Tasks'}/${project.name}"`);
                 } catch (error) {
                     console.error('Error fetching tasks:', error);
                     new Notice('Failed to fetch tasks. Check console for details.');

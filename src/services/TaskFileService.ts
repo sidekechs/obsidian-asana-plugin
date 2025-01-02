@@ -13,13 +13,16 @@ export class TaskFileService {
 
     async createTaskFile(task: AsanaTask, projectName: string, taskFolder: string, templatePath?: string): Promise<string> {
         const sanitizedName = this.sanitizeFileName(task.name || 'Untitled Task');
-        let fileName = `${taskFolder}/${projectName}/${sanitizedName}.md`;
+        const workspaceName = this.sanitizeFileName(task.workspace?.name || 'Default Workspace');
+        const sanitizedProjectName = this.sanitizeFileName(projectName);
+        
+        let fileName = `${taskFolder}/${workspaceName}/${sanitizedProjectName}/${sanitizedName}.md`;
         
         // Ensure unique filename
         let counter = 1;
         while (this.vault.getAbstractFileByPath(getLinkpath(fileName))) {
             const newName = `${sanitizedName} ${counter}`;
-            fileName = `${taskFolder}/${projectName}/${newName}.md`;
+            fileName = `${taskFolder}/${workspaceName}/${sanitizedProjectName}/${newName}.md`;
             counter++;
         }
 
@@ -27,8 +30,8 @@ export class TaskFileService {
         const content = await this.createTaskContent(task, frontmatter, templatePath);
 
         try {
-            // Ensure the task folder exists
-            await this.vault.adapter.mkdir(`${taskFolder}/${projectName}`);
+            // Ensure the nested folder structure exists
+            await this.vault.adapter.mkdir(`${taskFolder}/${workspaceName}/${sanitizedProjectName}`);
             
             // Create the file
             await this.vault.create(fileName, content);
@@ -58,8 +61,7 @@ export class TaskFileService {
             created_at: new Date().toISOString(),
             tags: task.tags?.map(tag => tag.name) || [],
             projects: task.projects?.map(p => p.name) || [],
-            workspace: task.workspace?.name || '',
-            permalink_url: task.permalink_url || ''
+            workspace: task.workspace?.name || ''
         };
 
         return '---\n' + Object.entries(frontmatterObj)
@@ -76,6 +78,11 @@ export class TaskFileService {
                 if (templateFile instanceof TFile) {
                     let template = await this.vault.read(templateFile);
                     
+                    // Create the links for template replacement
+                    const externalLink = task.permalink_url ? `[Open in Browser](${task.permalink_url})` : '';
+                    const internalLink = task.gid ? `[Open in App](asana://0/${task.gid})` : '';
+                    const combinedLinks = [externalLink, internalLink].filter(Boolean).join(' | ');
+                    
                     // Replace template variables
                     template = template
                         .replace(/{{task_name}}/g, task.name || 'Untitled Task')
@@ -86,7 +93,7 @@ export class TaskFileService {
                         .replace(/{{task_tags}}/g, (task.tags?.map(tag => tag.name) || []).join(', '))
                         .replace(/{{task_projects}}/g, (task.projects?.map(p => p.name) || []).join(', '))
                         .replace(/{{task_workspace}}/g, task.workspace?.name || '')
-                        .replace(/{{task_url}}/g, task.permalink_url || '')
+                        .replace(/{{task_links}}/g, combinedLinks)
                         .replace(/{{date}}/g, new Date().toISOString().split('T')[0])
                         .replace(/{{time}}/g, new Date().toLocaleTimeString());
 
@@ -99,6 +106,12 @@ export class TaskFileService {
 
         // Default content if no template or template fails
         content += `# ${task.name || 'Untitled Task'}\n\n`;
+        
+        // Add links section with both internal and external links
+        const externalLink = task.permalink_url ? `[Open in Browser](${task.permalink_url})` : '';
+        const internalLink = task.gid ? `[Open in App](asana://0/${task.gid})` : '';
+        const links = [externalLink, internalLink].filter(Boolean).join(' | ');
+        content += `## Links\n${links}\n\n`;
         
         if (task.notes) {
             content += `## Description\n${task.notes}\n\n`;

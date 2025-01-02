@@ -75,6 +75,20 @@ export class AsanaService {
         }
     }
 
+    async getProject(projectId: string): Promise<AsanaProject> {
+        try {
+            const project = await this.client.projects.findById(projectId);
+
+            return {
+                gid: project.gid,
+                name: project.name
+            };
+        } catch (error) {
+            console.error('Error fetching project:', error);
+            throw error;
+        }
+    }
+
     async getTasksForProject(projectId: string): Promise<AsanaTask[]> {
         try {
             const allTasks: any[] = [];
@@ -224,23 +238,78 @@ export class AsanaService {
             }
 
             // Create the task first
-            const task = await this.client.tasks.create(taskData);
+            const createdTask = await this.client.tasks.create(taskData);
 
             // If priority is set, update it separately
-            if (data.priority && task.gid) {
+            if (data.priority && createdTask.gid && data.projectId) {
                 try {
-                    await this.client.tasks.update(task.gid, {
-                        custom_fields: {
-                            'Priority': data.priority.charAt(0).toUpperCase() + data.priority.slice(1)
-                        }
+                    // Get the custom fields for the project
+                    const projectResponse: any = await this.client.projects.findById(data.projectId, {
+                        opt_fields: 'custom_fields,custom_fields.name,custom_fields.enum_options'
                     });
+                    
+                    // Find the Priority custom field
+                    const priorityField = projectResponse.custom_fields?.find((field: any) => field.name === 'Priority');
+                    
+                    if (priorityField) {
+                        // Find the enum option that matches our priority
+                        const priorityOption = priorityField.enum_options?.find((option: any) => 
+                            option.name.toLowerCase() === data.priority?.toLowerCase()
+                        );
+
+                        if (priorityOption) {
+                            // Update the task with the correct custom field
+                            const customFields: { [key: string]: string } = {};
+                            customFields[priorityField.gid] = priorityOption.gid;
+                            
+                            await this.client.tasks.update(createdTask.gid, {
+                                custom_fields: customFields
+                            });
+                        }
+                    }
                 } catch (error) {
                     console.warn('Could not set priority:', error);
                     // Don't fail the whole operation if just priority setting fails
                 }
             }
 
-            return task;
+            // Fetch the complete task data including permalink_url
+            const completeTask = await this.client.tasks.findById(createdTask.gid, {
+                opt_fields: 'name,notes,due_on,completed,custom_fields,assignee,projects,tags,workspace,permalink_url'
+            });
+
+            // Map the response to our AsanaTask type
+            return {
+                gid: completeTask.gid,
+                name: completeTask.name,
+                notes: completeTask.notes,
+                due_on: completeTask.due_on,
+                completed: completeTask.completed,
+                custom_fields: completeTask.custom_fields.map((cf: any) => ({
+                    gid: cf.gid,
+                    name: cf.name,
+                    display_value: cf.display_value,
+                    type: cf.type
+                })),
+                assignee: completeTask.assignee ? {
+                    gid: completeTask.assignee.gid,
+                    name: completeTask.assignee.name,
+                    email: completeTask.assignee.email
+                } : null,
+                projects: completeTask.projects.map((p: any) => ({
+                    gid: p.gid,
+                    name: p.name
+                })),
+                tags: completeTask.tags.map((tag: any) => ({
+                    gid: tag.gid,
+                    name: tag.name
+                })),
+                workspace: {
+                    gid: completeTask.workspace.gid,
+                    name: completeTask.workspace.name
+                },
+                permalink_url: completeTask.permalink_url
+            };
         } catch (error) {
             console.error('Error creating task:', error);
             throw error;
