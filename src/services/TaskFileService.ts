@@ -107,17 +107,10 @@ export class TaskFileService {
         // Default content if no template or template fails
         content += `# ${task.name || 'Untitled Task'}\n\n`;
         
-        // Add links section with both internal and external links
-        const externalLink = task.permalink_url ? `[Open in Browser](${task.permalink_url})` : '';
-        const internalLink = task.gid ? `[Open in App](asana://0/${task.gid})` : '';
-        const links = [externalLink, internalLink].filter(Boolean).join(' | ');
-        content += `## Links\n${links}\n\n`;
-        
         if (task.notes) {
             content += `## Description\n${task.notes}\n\n`;
         }
 
-        content += '## Comments\n\n';
         return content;
     }
 

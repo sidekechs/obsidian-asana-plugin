@@ -334,13 +334,15 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                                 low: '🟢'
                             }[data.priority || 'medium'];
 
-                            // Create Obsidian wiki-link with escaped task name and path
-                            const escapedName = encodeURIComponent(data.name);
-                            const escapedPath = fileName.replace(/\.md$/, '').split('/').map(part => encodeURIComponent(part)).join('/');
-                            const wikiLink = `[${data.name} ${priorityEmoji}](${escapedPath})`;
-                            const browserLink = `[Open in Browser](${task.permalink_url})`;
+                            // Format the due date if present
+                            const dateStr = completeTask.due_on ? ` 📅 ${completeTask.due_on}` : '';
 
-                            const newLine = `- [x] ${wikiLink} | ${browserLink}`;
+                            // Create Obsidian wiki-link and Asana link
+                            const escapedPath = fileName.replace(/\.md$/, '');
+                            const obsidianLink = `[[${escapedPath}|open in obsidian]]`;
+                            const asanaLink = `[open in asana](${task.permalink_url})`;
+
+                            const newLine = `- [ ] ${data.name}${dateStr} ${obsidianLink} | ${asanaLink}`;
                             editor.setLine(currentLine, newLine);
                             new Notice('Task created in Asana and local file created');
                         } catch (error) {
