@@ -15,9 +15,11 @@ export class ProjectSelectionModal extends Modal {
     }
 
     private getFilteredProjects(): AsanaProject[] {
-        return this.projects.filter(project => 
-            project.name.toLowerCase().includes(this.searchTerm.toLowerCase())
-        );
+        return this.projects
+            .filter(project => 
+                project.name.toLowerCase().includes(this.searchTerm.toLowerCase())
+            )
+            .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     }
 
     private getCurrentPageProjects(): AsanaProject[] {

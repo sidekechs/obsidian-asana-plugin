@@ -4,8 +4,8 @@
   "description": "Asana integration for Obsidian",
   "main": "main.js",
   "scripts": {
-    "dev": "node esbuild.config.mjs development \"/Users/enovara/Documents/Bruce/.obsidian/plugins/obsidian-asana-plugin\"",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production \"/Users/enovara/Documents/Bruce/.obsidian/plugins/obsidian-asana-plugin\"",
+    "dev": "node esbuild.config.mjs development dist",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production dist",
     "test": "jest",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },

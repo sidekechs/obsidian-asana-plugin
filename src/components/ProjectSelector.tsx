@@ -22,7 +22,11 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({ asanaService, 
         const loadProjects = async () => {
             try {
                 const projectList = await asanaService.getProjects();
-                setProjects(projectList);
+                // Sort projects alphabetically by name
+                const sortedProjects = projectList.sort((a, b) => 
+                    a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+                );
+                setProjects(sortedProjects);
                 setLoading(false);
             } catch (err) {
                 setError('Failed to load projects');
