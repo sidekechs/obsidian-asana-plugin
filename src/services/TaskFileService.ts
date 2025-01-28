@@ -1,5 +1,6 @@
-import { TFile, Vault, getLinkpath } from 'obsidian';
+import { TFile, Vault, getLinkpath, MetadataCache } from 'obsidian';
 import { AsanaTask, AsanaTaskData } from '../types';
+import { AsanaService } from './AsanaService';
 
 interface TaskData {
     completed: boolean;
@@ -9,7 +10,11 @@ interface TaskData {
 }
 
 export class TaskFileService {
-    constructor(private vault: Vault) {}
+    constructor(
+        private vault: Vault, 
+        private metadataCache: MetadataCache,
+        private asanaService: AsanaService
+    ) {}
 
     async createTaskFile(task: AsanaTask, projectName: string, taskFolder: string, templatePath?: string): Promise<string> {
         const sanitizedName = this.sanitizeFileName(task.name || 'Untitled Task');
@@ -26,12 +31,13 @@ export class TaskFileService {
             counter++;
         }
 
-        const frontmatter = this.createTaskFrontmatter(task);
-        const content = await this.createTaskContent(task, frontmatter, templatePath);
-
         try {
             // Ensure the nested folder structure exists
             await this.vault.adapter.mkdir(`${taskFolder}/${workspaceName}/${sanitizedProjectName}`);
+            
+            // Create frontmatter and content
+            const frontmatter = this.createTaskFrontmatter(task);
+            const content = await this.createTaskContent(task, frontmatter, templatePath);
             
             // Create the file
             await this.vault.create(fileName, content);
@@ -43,11 +49,11 @@ export class TaskFileService {
     }
 
     private sanitizeFileName(name: string): string {
-        // Replace invalid characters with underscores and trim
+        // Remove invalid characters and trim
         const sanitized = name
-            .replace(/[\\/:*?"<>|]/g, '_') // Replace Windows-invalid chars
+            .replace(/[\\/:*?"<>|]/g, '')  // Remove invalid filename characters
             .replace(/\s+/g, ' ')          // Replace multiple spaces with single space
-            .trim();                       // Remove leading/trailing spaces
+            .trim();
         
         return sanitized || 'Untitled Task';
     }
@@ -61,7 +67,8 @@ export class TaskFileService {
             created_at: new Date().toISOString(),
             tags: task.tags?.map(tag => tag.name) || [],
             projects: task.projects?.map(p => p.name) || [],
-            workspace: task.workspace?.name || ''
+            workspace: task.workspace?.name || '',
+            permalink_url: task.permalink_url || ''
         };
 
         return '---\n' + Object.entries(frontmatterObj)
@@ -78,10 +85,13 @@ export class TaskFileService {
                 if (templateFile instanceof TFile) {
                     let template = await this.vault.read(templateFile);
                     
-                    // Create the links for template replacement
-                    const externalLink = task.permalink_url ? `[Open in Browser](${task.permalink_url})` : '';
-                    const internalLink = task.gid ? `[Open in App](asana://0/${task.gid})` : '';
-                    const combinedLinks = [externalLink, internalLink].filter(Boolean).join(' | ');
+                    // Get workspace and project info
+                    const workspaceName = task.workspace?.name || 'Default';
+                    const projectName = task.projects?.[0]?.name || 'Uncategorized';
+                    const taskPath = `Asana Tasks/${workspaceName}/${projectName}/${task.name}`;
+                    const obsidianLink = `[[${taskPath}|open in obsidian]]`;
+                    const asanaLink = `[[${taskPath}|open in asana]]`;
+                    const links = `${obsidianLink} | ${asanaLink}`;
                     
                     // Replace template variables
                     template = template
@@ -91,9 +101,10 @@ export class TaskFileService {
                         .replace(/{{task_due_date}}/g, task.due_on || 'No due date')
                         .replace(/{{task_assignee}}/g, task.assignee?.name || 'Unassigned')
                         .replace(/{{task_tags}}/g, (task.tags?.map(tag => tag.name) || []).join(', '))
-                        .replace(/{{task_projects}}/g, (task.projects?.map(p => p.name) || []).join(', '))
-                        .replace(/{{task_workspace}}/g, task.workspace?.name || '')
-                        .replace(/{{task_links}}/g, combinedLinks)
+                        .replace(/{{task_projects}}/g, projectName)
+                        .replace(/{{task_workspace}}/g, workspaceName)
+                        .replace(/{{task_links}}/g, links)
+                        .replace(/{{task_permalink}}/g, task.permalink_url || '')
                         .replace(/{{date}}/g, new Date().toISOString().split('T')[0])
                         .replace(/{{time}}/g, new Date().toLocaleTimeString());
 
@@ -106,12 +117,89 @@ export class TaskFileService {
 
         // Default content if no template or template fails
         content += `# ${task.name || 'Untitled Task'}\n\n`;
-        
         if (task.notes) {
             content += `${task.notes}\n\n`;
         }
 
         return content;
+    }
+
+    public parseFrontmatter(frontmatter: string): Record<string, any> {
+        try {
+            // Simple frontmatter parser
+            const lines = frontmatter.split('\n');
+            const result: Record<string, any> = {};
+            
+            for (const line of lines) {
+                const match = line.match(/^(\w+):\s*(.+)$/);
+                if (match) {
+                    const [_, key, value] = match;
+                    try {
+                        // Try to parse as JSON first
+                        result[key] = JSON.parse(value);
+                    } catch {
+                        // If not valid JSON, use the raw string
+                        result[key] = value;
+                    }
+                }
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('Error parsing frontmatter:', error);
+            return {};
+        }
+    }
+
+    extractFrontmatter(content: string): any {
+        const matches = content.match(/^---\n([\s\S]*?)\n---/);
+        if (matches && matches[1]) {
+            return this.parseFrontmatter(matches[1]);
+        }
+        return null;
+    }
+
+    extractTaskData(content: string, metadata: any): TaskData {
+        // Split content to remove frontmatter
+        const parts = content.split('---\n');
+        if (parts.length < 3) {
+            return {
+                name: '',
+                notes: '',
+                completed: metadata.status === 'completed',
+                due_on: metadata.due_date || null
+            };
+        }
+
+        // Get the actual content (after frontmatter)
+        const bodyContent = parts.slice(2).join('---\n').trim();
+        const lines = bodyContent.split('\n');
+        
+        // Extract name from task line
+        let name = '';
+        let notes = '';
+        let completed = metadata.status === 'completed';
+        
+        // Look for task line with links
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const taskMatch = line.match(/^-\s*\[([\sxX])\]\s*\*\*(.*?)\*\*/);
+            if (taskMatch) {
+                completed = taskMatch[1].toLowerCase() === 'x';
+                name = taskMatch[2];
+                
+                // Rest of the lines are notes
+                notes = lines.slice(i + 1).join('\n').trim();
+                break;
+            }
+        }
+
+        return {
+            name,
+            notes,
+            completed,
+            due_on: metadata.due_date || null
+        };
     }
 
     async updateTaskFile(file: TFile, taskData: TaskData): Promise<void> {
@@ -135,74 +223,27 @@ export class TaskFileService {
         await this.vault.modify(file, newContent);
     }
 
-    public parseFrontmatter(frontmatter: string): Record<string, any> {
-        const result: Record<string, any> = {};
-        const lines = frontmatter.split('\n');
+    async saveTask(file: TFile): Promise<void> {
+        const content = await this.vault.read(file);
+        const metadata = this.metadataCache.getFileCache(file)?.frontmatter;
         
-        for (const line of lines) {
-            const match = line.match(/^(\w+):\s*(.+)$/);
-            if (match) {
-                try {
-                    result[match[1]] = JSON.parse(match[2]);
-                } catch {
-                    result[match[1]] = match[2];
-                }
-            }
+        if (!metadata?.asana_gid) {
+            throw new Error('No Asana task ID found');
         }
-        
-        return result;
+
+        const taskData = this.extractTaskData(content, metadata);
+        await this.asanaService.updateTask(metadata.asana_gid, taskData);
     }
 
-    extractTaskData(content: string, metadata: any): TaskData {
-        // Split content to remove frontmatter
-        const parts = content.split('---\n');
-        if (parts.length < 3) {
-            return {
-                name: '',
-                notes: '',
-                completed: metadata.status === 'completed',
-                due_on: metadata.due_date || null
-            };
-        }
-
-        // Get the actual content (after frontmatter)
-        const bodyContent = parts.slice(2).join('---\n').trim();
-        const lines = bodyContent.split('\n');
+    async syncTask(file: TFile): Promise<void> {
+        const content = await this.vault.read(file);
+        const metadata = this.metadataCache.getFileCache(file)?.frontmatter;
         
-        // Extract name from first heading
-        const nameMatch = bodyContent.match(/^# (.+)$/m);
-        const name = nameMatch ? nameMatch[1].trim() : '';
-
-        // Process the rest as notes, excluding the Comments section
-        let notes = '';
-        let foundComments = false;
-
-        for (const line of lines) {
-            // Skip the title line
-            if (line.startsWith('# ')) {
-                continue;
-            }
-
-            // Stop at Comments section
-            if (line.startsWith('## Comments')) {
-                foundComments = true;
-                break;
-            }
-
-            // Add non-empty lines to notes
-            if (line.trim()) {
-                if (notes) {
-                    notes += '\n';
-                }
-                notes += line.trim();
-            }
+        if (!metadata?.asana_gid) {
+            throw new Error('No Asana task ID found');
         }
 
-        return {
-            name,
-            notes,
-            completed: metadata.status === 'completed',
-            due_on: metadata.due_date || null
-        };
+        const taskData = this.extractTaskData(content, metadata);
+        await this.asanaService.updateTask(metadata.asana_gid, taskData);
     }
 }

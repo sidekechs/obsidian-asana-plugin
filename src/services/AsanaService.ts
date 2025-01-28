@@ -316,6 +316,15 @@ export class AsanaService {
         }
     }
 
+    async deleteTask(taskId: string): Promise<void> {
+        try {
+            await this.client.tasks.delete(taskId);
+        } catch (error) {
+            console.error('Error deleting task:', error);
+            throw error;
+        }
+    }
+
     updateAccessToken(newToken: string) {
         this.initialize(newToken);
     }

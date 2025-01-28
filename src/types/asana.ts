@@ -22,7 +22,7 @@ export interface AsanaCustomField {
 export interface AsanaUser {
     gid: string;
     name: string;
-    email: string;
+    email?: string;
 }
 
 export interface AsanaProject {

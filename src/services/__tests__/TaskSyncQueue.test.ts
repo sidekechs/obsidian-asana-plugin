@@ -10,73 +10,72 @@ describe('TaskSyncQueue', () => {
         queue = new TaskSyncQueue();
     });
 
-    describe('queueTask', () => {
-        it('should execute tasks in order', async () => {
-            const file = new TFile();
-            file.path = 'test/test.md';
+    it('should process tasks in order', async () => {
+        const results: number[] = [];
+        const task1 = async () => {
+            await new Promise(resolve => setTimeout(resolve, 10));
+            results.push(1);
+        };
+        const task2 = async () => {
+            results.push(2);
+        };
 
-            const results: number[] = [];
-            const task1 = async () => {
-                await Promise.resolve();
-                results.push(1);
-            };
+        // Enqueue tasks
+        await queue.enqueue(task1);
+        await queue.enqueue(task2);
 
-            const task2 = async () => {
-                results.push(2);
-            };
+        // Process tasks
+        await queue.processNext();
+        await queue.processNext();
 
-            await queue.queueTask(file, task1);
-            await queue.queueTask(file, task2);
+        expect(results).toEqual([1, 2]);
+    });
 
-            expect(results).toEqual([1, 2]);
+    it('should handle task errors gracefully', async () => {
+        const results: string[] = [];
+        const errorTask = async () => {
+            throw new Error('Test error');
+        };
+        const successTask = async () => {
+            results.push('success');
+        };
+
+        try {
+            await queue.enqueue(errorTask);
+            await queue.processNext();
+        } catch (error) {
+            results.push('error caught');
+        }
+
+        await queue.enqueue(successTask);
+        await queue.processNext();
+
+        await queue.enqueue(async () => {
+            results.push('final task');
         });
+        await queue.processNext();
 
-        it('should handle errors in tasks', async () => {
-            const file = new TFile();
-            file.path = 'test/test.md';
+        expect(results).toEqual(['error caught', 'success', 'final task']);
+    });
 
-            const results: string[] = [];
-            const errorTask = () => Promise.reject(new Error('Task failed'));
-            const successTask = async () => {
-                results.push('success');
-            };
+    it('should process tasks independently', async () => {
+        const results: string[] = [];
+        const task1 = async () => {
+            await new Promise(resolve => setTimeout(resolve, 10));
+            results.push('task1');
+        };
+        const task2 = async () => {
+            results.push('task2');
+        };
 
-            // First task should fail
-            try {
-                await queue.queueTask(file, errorTask);
-            } catch (error) {
-                expect(error.message).toBe('Task failed');
-            }
+        // Enqueue tasks
+        await queue.enqueue(task1);
+        await queue.enqueue(task2);
 
-            // Second task should succeed
-            await queue.queueTask(file, successTask);
+        // Process tasks
+        await queue.processNext();
+        await queue.processNext();
 
-            // Verify the queue is empty and all tasks have been processed
-            await queue.queueTask(file, async () => {
-                expect(results).toEqual(['success']);
-            });
-        });
-
-        it('should process tasks for different files independently', async () => {
-            const file1 = new TFile();
-            file1.path = 'test/test1.md';
-            const file2 = new TFile();
-            file2.path = 'test/test2.md';
-
-            const results: string[] = [];
-            const task1 = async () => {
-                await Promise.resolve();
-                results.push('file1');
-            };
-
-            const task2 = async () => {
-                results.push('file2');
-            };
-
-            await queue.queueTask(file1, task1);
-            await queue.queueTask(file2, task2);
-
-            expect(results).toEqual(['file1', 'file2']);
-        });
+        expect(results).toEqual(['task1', 'task2']);
     });
 });

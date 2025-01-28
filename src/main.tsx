@@ -5,7 +5,8 @@ import {
     TFile,
     TAbstractFile,
     MarkdownView,
-    Modal
+    Modal,
+    Editor
 } from 'obsidian';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -14,8 +15,8 @@ import {
     DEFAULT_SETTINGS, 
     IAsanaPlugin, 
     AsanaProject, 
-    IAsanaTask, 
-    IAsanaUser 
+    AsanaTask, 
+    AsanaUser 
 } from './types';
 import { AsanaSettingTab } from './ui/SettingsTab';
 import { AsanaService } from './services/AsanaService';
@@ -24,17 +25,19 @@ import { TaskSyncQueue } from './services/TaskSyncQueue';
 import { TaskSyncService } from './services/TaskSyncService';
 import { ProjectSelector } from './components/ProjectSelector';
 import { TaskComments } from './components/TaskComments';
-import { CreateTaskModal } from './ui/CreateTaskModal';
+import { ProjectSelectionModal } from './ui/ProjectSelectionModal';
 
 class ProjectModal extends Modal {
     private projects: AsanaProject[];
     private onChoose: (project: AsanaProject) => void;
     private root: ReturnType<typeof createRoot> | null = null;
+    private asanaService: AsanaService;
 
-    constructor(app: App, projects: AsanaProject[], onChoose: (project: AsanaProject) => void) {
+    constructor(app: App, projects: AsanaProject[], onChoose: (project: AsanaProject) => void, asanaService: AsanaService) {
         super(app);
         this.projects = projects;
         this.onChoose = onChoose;
+        this.asanaService = asanaService;
     }
 
     onOpen() {
@@ -45,10 +48,13 @@ class ProjectModal extends Modal {
         this.root = createRoot(container);
         this.root.render(
             <ProjectSelector 
-                projects={this.projects} 
-                onSelect={(project) => {
-                    this.onChoose(project);
-                    this.close();
+                asanaService={this.asanaService}
+                onProjectSelect={(projectId) => {
+                    const project = this.projects.find(p => p.gid === projectId);
+                    if (project) {
+                        this.onChoose(project);
+                        this.close();
+                    }
                 }}
             />
         );
@@ -57,7 +63,6 @@ class ProjectModal extends Modal {
     onClose() {
         if (this.root) {
             this.root.unmount();
-            this.root = null;
         }
         const { contentEl } = this;
         contentEl.empty();
@@ -84,7 +89,7 @@ class CommentsModal extends Modal {
         this.root.render(
             <TaskComments 
                 taskId={this.taskId} 
-                asanaService={this.asanaService}
+                asanaService={this.asanaService} 
             />
         );
     }
@@ -92,7 +97,6 @@ class CommentsModal extends Modal {
     onClose() {
         if (this.root) {
             this.root.unmount();
-            this.root = null;
         }
         const { contentEl } = this;
         contentEl.empty();
@@ -109,18 +113,20 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
 
     async onload() {
         await this.loadSettings();
+
+        // Initialize services
         this.initializeServices();
-        this.addCommands();
-        this.addRibbonIcon('list-check', 'Fetch Asana Projects', async () => {
-            try {
-                await this.fetchAsanaProjects();
-            } catch (error) {
-                console.error('Error fetching projects:', error);
-                new Notice('Failed to fetch projects');
-            }
-        });
-        this.registerEventHandlers();
+
+        // Add settings tab
         this.addSettingTab(new AsanaSettingTab(this.app, this));
+
+        // Add commands
+        this.addCommands();
+
+        // Register event handlers
+        this.registerEventHandlers();
+
+        // Start sync interval
         this.startSyncInterval();
     }
 
@@ -128,9 +134,13 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
         this.stopSyncInterval();
     }
 
-    public initializeServices() {
+    initializeServices() {
         this.asanaService = new AsanaService(this.settings.asanaAccessToken);
-        this.taskFileService = new TaskFileService(this.app.vault);
+        this.taskFileService = new TaskFileService(
+            this.app.vault,
+            this.app.metadataCache,
+            this.asanaService
+        );
         this.taskSyncQueue = new TaskSyncQueue();
         this.taskSyncService = new TaskSyncService(
             this.app.vault,
@@ -139,260 +149,285 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
         );
     }
 
-    public async loadSettings() {
+    async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     }
 
-    public async saveSettings() {
-        try {
-            await this.saveData(this.settings);
-        } catch (error) {
-            console.error('Error saving settings:', error);
-            new Notice('Failed to save settings');
-        }
+    async saveSettings() {
+        await this.saveData(this.settings);
+        this.initializeServices();
+        this.startSyncInterval();
     }
 
-    public startSyncInterval() {
+    startSyncInterval() {
         this.stopSyncInterval();
         if (this.settings.syncInterval > 0) {
-            this.syncIntervalId = window.setInterval(
-                () => this.syncTasks(),
-                this.settings.syncInterval * 60000
-            );
+            this.syncIntervalId = window.setInterval(() => {
+                this.syncTasks();
+            }, this.settings.syncInterval * 60 * 1000); // Convert minutes to milliseconds
         }
     }
 
-    public stopSyncInterval() {
+    stopSyncInterval() {
         if (this.syncIntervalId !== null) {
-            clearInterval(this.syncIntervalId);
+            window.clearInterval(this.syncIntervalId);
             this.syncIntervalId = null;
         }
     }
 
     private addCommands() {
-        // Save command
+        // Create task from selection command
         this.addCommand({
-            id: 'save-current-task',
-            name: 'Save current task to Asana',
-            callback: async () => {
-                const activeFile = this.app.workspace.getActiveFile();
-                if (!activeFile) {
-                    new Notice('No active file');
+            id: 'create-task-from-selection',
+            name: 'Create Task from Selection',
+            editorCallback: (editor) => {
+                const selectedText = editor.getSelection();
+                console.log('Raw selected text:', JSON.stringify(selectedText));
+                console.log('Selection length:', selectedText.length);
+                console.log('Selection lines:', selectedText.split('\n').length);
+
+                if (!selectedText) {
+                    new Notice('Please select some text first');
                     return;
                 }
-                try {
-                    await this.taskSyncService.syncTaskToAsana(activeFile);
-                    new Notice('Task saved to Asana');
-                } catch (error) {
-                    console.error('Error saving task:', error);
-                    new Notice('Failed to save task to Asana');
-                }
+
+                this.createTask(selectedText);
             }
         });
 
-        // Fetch projects command
-        this.addCommand({
-            id: 'fetch-asana-projects',
-            name: 'Fetch projects from Asana',
-            callback: async () => {
-                try {
-                    await this.fetchAsanaProjects();
-                } catch (error) {
-                    console.error('Error fetching projects:', error);
-                    new Notice('Failed to fetch projects');
-                }
-            }
-        });
-
-        // Open in browser command
-        this.addCommand({
-            id: 'open-in-asana',
-            name: 'Open current task in Asana',
-            callback: () => {
-                const activeFile = this.app.workspace.getActiveFile();
-                if (!activeFile) {
-                    new Notice('No active file');
-                    return;
-                }
-                const metadata = this.app.metadataCache.getFileCache(activeFile)?.frontmatter;
-                if (!metadata?.permalink_url) {
-                    new Notice('No Asana URL found');
-                    return;
-                }
-                window.open(metadata.permalink_url, '_blank');
-            }
-        });
-
-        // Sync current task command
-        this.addCommand({
-            id: 'sync-with-asana',
-            name: 'Sync current task with Asana',
-            callback: async () => {
-                const activeFile = this.app.workspace.getActiveFile();
-                if (!activeFile) {
-                    new Notice('No active file');
-                    return;
-                }
-                try {
-                    await this.taskSyncService.syncTaskToAsana(activeFile);
-                    new Notice('Task synced with Asana');
-                } catch (error) {
-                    console.error('Error syncing task:', error);
-                    new Notice('Failed to sync task with Asana');
-                }
-            }
-        });
-
-        // Open comments command
-        this.addCommand({
-            id: 'view-asana-comments',
-            name: 'View Asana task comments',
-            callback: () => {
-                const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-                if (!activeView?.file) {
-                    new Notice('No active file');
-                    return;
-                }
-                const metadata = this.app.metadataCache.getFileCache(activeView.file)?.frontmatter;
-                if (!metadata?.asana_gid) {
-                    new Notice('No Asana task ID found');
-                    return;
-                }
-                new CommentsModal(this.app, metadata.asana_gid, this.asanaService).open();
-            }
-        });
-
-        // Create task from line command
+        // Create task from current line command
         this.addCommand({
             id: 'create-task-from-line',
             name: 'Create Asana task from current line',
             hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'a' }],
             editorCallback: (editor) => {
-                const currentLine = editor.getCursor().line;
-                const line = editor.getLine(currentLine);
-                
-                // Check if line is a task
-                if (!line.trim().startsWith('- [ ]')) {
-                    new Notice('Current line is not a task');
+                const selectedText = editor.getSelection();
+                console.log('Raw selected text:', JSON.stringify(selectedText));
+                console.log('Selection length:', selectedText.length);
+                console.log('Selection lines:', selectedText.split('\n').length);
+
+                if (!selectedText) {
+                    new Notice('Please select some text first');
                     return;
                 }
 
-                // Extract task name (remove checkbox and trim)
-                const taskName = line.replace(/^-\s*\[\s*\]\s*/, '').trim();
+                this.createTask(selectedText);
+            }
+        });
 
-                // Get the next lines until we hit an empty line or another list item
-                let description = '';
-                let nextLine = currentLine + 1;
-                while (nextLine < editor.lineCount()) {
-                    const nextLineText = editor.getLine(nextLine);
-                    if (!nextLineText.trim() || nextLineText.trim().startsWith('-')) {
-                        break;
-                    }
-                    if (description) description += '\n';
-                    description += nextLineText.trim();
-                    nextLine++;
-                }
-                
-                new CreateTaskModal(
+        // Command to create a new task
+        this.addCommand({
+            id: 'create-task',
+            name: 'Create Task',
+            editorCallback: (editor: Editor) => {
+                const selectedText = editor.getSelection();
+                new ProjectSelectionModal(
                     this.app,
                     this.asanaService,
-                    taskName,
-                    async (data) => {
+                    this.taskFileService,
+                    this.settings,
+                    selectedText,
+                    () => {}
+                ).open();
+            }
+        });
+
+        // Command to sync all tasks
+        this.addCommand({
+            id: 'sync-tasks',
+            name: 'Sync All Tasks',
+            callback: async () => {
+                try {
+                    const taskFolder = this.settings.taskFolder;
+                    const files = this.app.vault.getFiles()
+                        .filter(file => file.path.startsWith(taskFolder));
+                    
+                    let syncCount = 0;
+                    for (const file of files) {
                         try {
-                            const task = await this.asanaService.createTask({
-                                name: data.name,
-                                notes: data.notes || description,
-                                projectId: data.projectId,
-                                assigneeId: data.assigneeId,
-                                dueDate: data.dueDate,
-                                priority: data.priority
-                            });
-
-                            // Get project and workspace info
-                            const project = await this.asanaService.getProject(data.projectId);
-                            const workspace = await this.asanaService.getCurrentUser();
-                            
-                            // Create a complete task object for file creation
-                            const completeTask = {
-                                ...task,
-                                workspace: workspace.workspaces[0],
-                                projects: [project]
-                            };
-
-                            // Create the local file
-                            const taskFolderPath = this.settings.taskFolder || 'Tasks';
-                            const fileName = await this.taskFileService.createTaskFile(
-                                completeTask,
-                                project.name,
-                                taskFolderPath,
-                                this.settings.templateFile
-                            );
-
-                            const priorityEmoji = {
-                                high: '🔴',
-                                medium: '🟡',
-                                low: '🟢'
-                            }[data.priority || 'medium'];
-
-                            // Format the due date if present
-                            const dateStr = completeTask.due_on ? ` 📅 ${completeTask.due_on}` : '';
-
-                            // Create Obsidian wiki-link and Asana link
-                            const escapedPath = fileName.replace(/\.md$/, '');
-                            const obsidianLink = `[[${escapedPath}|open in obsidian]]`;
-                            const asanaLink = `[open in asana](${task.permalink_url})`;
-
-                            const newLine = `- [ ] ${data.name}${dateStr} ${obsidianLink} | ${asanaLink}`;
-                            editor.setLine(currentLine, newLine);
-                            new Notice('Task created in Asana and local file created');
+                            await this.taskSyncService.syncTaskToAsana(file);
+                            syncCount++;
                         } catch (error) {
-                            console.error('Error creating task:', error);
-                            new Notice('Failed to create task in Asana');
+                            console.error(`Error syncing task ${file.path}:`, error);
                         }
                     }
-                ).open();
+                    
+                    new Notice(`Successfully synced ${syncCount} tasks`);
+                } catch (error) {
+                    console.error('Error syncing all tasks:', error);
+                    new Notice('Failed to sync tasks');
+                }
+            }
+        });
+
+        // Command to open task in Asana
+        this.addCommand({
+            id: 'open-in-asana',
+            name: 'Open Task in Asana',
+            checkCallback: (checking: boolean) => {
+                const activeFile = this.app.workspace.getActiveFile();
+                if (!activeFile || !activeFile.path.startsWith(this.settings.taskFolder)) {
+                    return false;
+                }
+
+                if (!checking) {
+                    this.openTaskInAsana(activeFile);
+                }
+
+                return true;
             }
         });
     }
 
-    private registerEventHandlers() {
-        // ... existing event handlers
+    async openTaskInAsana(file: TFile) {
+        try {
+            const content = await this.app.vault.read(file);
+            const frontmatter = this.taskFileService.extractFrontmatter(content);
+            if (frontmatter && frontmatter.permalink_url) {
+                window.open(frontmatter.permalink_url);
+            } else {
+                new Notice('No Asana link found for this task');
+            }
+        } catch (error) {
+            console.error('Error opening task in Asana:', error);
+            new Notice('Failed to open task in Asana');
+        }
     }
 
-    private async fetchAsanaProjects() {
-        try {
-            const user = await this.asanaService.getCurrentUser();
-            const workspaceId = user.workspaces[0].gid;
-            const projects = await this.asanaService.getProjects(workspaceId);
+    private async createTask(content: string) {
+        console.log('Creating task with raw content:', JSON.stringify(content));
+        console.log('Content length:', content.length);
+        console.log('Content lines:', content.split('\n').length);
 
-            new ProjectModal(this.app, projects, async (project) => {
-                try {
-                    const tasks = await this.asanaService.getTasksForProject(project.gid);
-                    for (const task of tasks) {
-                        this.taskSyncQueue.enqueue(async () => {
-                            await this.taskFileService.createTaskFile(
-                                task,
-                                project.name,
-                                this.settings.taskFolder || 'Tasks',
-                                this.settings.templateFile
-                            );
-                        });
-                    }
-                    new Notice(`Tasks imported to "${this.settings.taskFolder || 'Tasks'}/${project.name}"`);
-                } catch (error) {
-                    console.error('Error fetching tasks:', error);
-                    new Notice('Failed to fetch tasks. Check console for details.');
-                    throw error;
+        if (!this.asanaService) {
+            new Notice('Please configure your Asana API token first.');
+            return;
+        }
+
+        const modal = new ProjectSelectionModal(
+            this.app,
+            this.asanaService,
+            this.taskFileService,
+            this.settings,
+            content,
+            async (projectId: string) => {
+                // Handle task creation callback if needed
+            }
+        );
+        modal.open();
+    }
+
+    private registerEventHandlers() {
+        // Register for file modifications
+        this.registerEvent(
+            this.app.vault.on('modify', (file: TAbstractFile) => {
+                if (file instanceof TFile && file.path.startsWith(this.settings.taskFolder)) {
+                    // Enqueue a function that syncs the task
+                    this.taskSyncQueue.enqueue(async () => {
+                        await this.taskFileService.syncTask(file);
+                    });
                 }
-            }).open();
+            })
+        );
+
+        // Register for file renames
+        this.registerEvent(
+            this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
+                if (file instanceof TFile && file.path.startsWith(this.settings.taskFolder)) {
+                    this.handleFileRename(file, oldPath);
+                }
+            })
+        );
+
+        // Register for file deletions
+        this.registerEvent(
+            this.app.vault.on('delete', (file: TAbstractFile) => {
+                if (file instanceof TFile && file.path.startsWith(this.settings.taskFolder)) {
+                    this.handleFileDelete(file);
+                }
+            })
+        );
+    }
+
+    async handleFileRename(file: TFile, oldPath: string) {
+        try {
+            const content = await this.app.vault.read(file);
+            const frontmatter = this.taskFileService.extractFrontmatter(content);
+            if (frontmatter && frontmatter.asana_gid) {
+                await this.asanaService.updateTask(frontmatter.asana_gid, {
+                    name: file.basename
+                });
+            }
         } catch (error) {
-            console.error('Error:', error);
-            new Notice('Failed to fetch projects');
+            console.error('Error handling file rename:', error);
+            new Notice('Failed to update task name in Asana');
+        }
+    }
+
+    async handleFileDelete(file: TFile) {
+        try {
+            const content = await this.app.vault.read(file);
+            const frontmatter = this.taskFileService.extractFrontmatter(content);
+            if (frontmatter && frontmatter.asana_gid) {
+                await this.asanaService.deleteTask(frontmatter.asana_gid);
+            }
+        } catch (error) {
+            console.error('Error handling file delete:', error);
+            new Notice('Failed to delete task in Asana');
+        }
+    }
+
+    async syncTasks() {
+        try {
+            await this.taskSyncQueue.processNext();
+        } catch (error) {
+            console.error('Error syncing task:', error);
+        }
+    }
+
+    public async fetchAsanaProjects() {
+        if (!this.asanaService) {
+            throw new Error('Asana service not initialized');
+        }
+
+        try {
+            const projects = await this.asanaService.getProjects();
+            return projects;
+        } catch (error) {
+            console.error('Error fetching projects:', error);
             throw error;
         }
     }
 
-    private async syncTasks() {
-        // ... existing sync logic
+    public updateAutoSaveInterval() {
+        this.stopSyncInterval();
+        this.startSyncInterval();
+    }
+
+    private async saveCurrentTask() {
+        const activeFile = this.app.workspace.getActiveFile();
+        if (!activeFile || activeFile.extension !== 'md') {
+            new Notice('No active task file');
+            return;
+        }
+
+        try {
+            await this.taskFileService.saveTask(activeFile);
+            new Notice('Task saved to Asana');
+        } catch (error) {
+            console.error('Error saving task:', error);
+            new Notice('Failed to save task to Asana: ' + error.message);
+        }
+    }
+
+    private async syncTaskFile(file: TFile) {
+        try {
+            await this.taskFileService.syncTask(file);
+            new Notice('Task updated in Asana');
+        } catch (error) {
+            console.error('Error updating task:', error);
+            new Notice('Failed to update task in Asana');
+            throw error;
+        }
     }
 }

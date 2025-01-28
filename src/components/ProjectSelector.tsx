@@ -3,7 +3,7 @@ import styled from '@emotion/styled';
 import { AsanaProject } from '../types';
 import { AsanaService } from '../services/AsanaService';
 import { ActionSearchBar, Action } from './ui/action-search-bar';
-import { Search } from 'lucide-react';
+import { FolderKanban } from 'lucide-react';
 
 export interface ProjectSelectorProps {
     asanaService: AsanaService;
@@ -30,7 +30,7 @@ const ProjectSelectorContainer = styled.div`
             background-color: var(--background-modifier-hover);
         }
 
-        .search-icon {
+        .project-icon {
             position: absolute;
             left: 8px;
             top: 50%;
@@ -78,7 +78,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({ asanaService, 
     const projectActions: Action[] = projects.map(project => ({
         id: project.gid,
         label: project.name,
-        icon: <Search className="h-4 w-4" />,
+        icon: <FolderKanban className="h-4 w-4" />,
         end: 'Project'
     }));
 
@@ -98,7 +98,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({ asanaService, 
                     className="selected-project"
                     onClick={() => setIsSearching(true)}
                 >
-                    <Search className="search-icon h-4 w-4" />
+                    <FolderKanban className="project-icon h-4 w-4" />
                     {selectedProject.name}
                 </div>
             </ProjectSelectorContainer>

@@ -11,5 +11,5 @@ export const DEFAULT_SETTINGS: AsanaPluginSettings = {
     taskFolder: 'Tasks',
     templateFile: '',
     syncInterval: 5,
-    autoSaveInterval: 30 // default to 30 seconds
+    autoSaveInterval: 0 // disabled by default
 };

@@ -16,10 +16,22 @@ export class TaskSyncService {
             const [frontmatter, ...bodyParts] = content.split('---\n').filter(Boolean);
             const metadata = this.taskFileService.parseFrontmatter(frontmatter);
 
-            // Get the task ID from frontmatter
-            const taskId = metadata.asana_gid;
+            // Get the task ID from frontmatter or from the line content
+            let taskId = metadata.asana_gid;
             if (!taskId) {
-                throw new Error('No Asana task ID found in frontmatter');
+                // Try to find task ID in the content
+                const lines = content.split('\n');
+                for (const line of lines) {
+                    const appLinkMatch = line.match(/asana:\/\/0\/(\d+)/);
+                    if (appLinkMatch) {
+                        taskId = appLinkMatch[1];
+                        break;
+                    }
+                }
+            }
+
+            if (!taskId) {
+                throw new Error('No Asana task ID found in frontmatter or content');
             }
 
             // Extract task data from the file

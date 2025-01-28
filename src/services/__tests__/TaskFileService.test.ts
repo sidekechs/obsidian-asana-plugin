@@ -1,14 +1,33 @@
 import { TaskFileService } from '../TaskFileService';
 import { Vault, TFile } from 'obsidian';
 import { AsanaTask } from '../../types';
+import { AsanaService } from '../AsanaService';
 
 describe('TaskFileService', () => {
     let service: TaskFileService;
     let mockVault: jest.Mocked<Vault>;
+    let mockMetadataCache: any;
+    let mockAsanaService: any;
 
     beforeEach(() => {
-        mockVault = new Vault() as jest.Mocked<Vault>;
-        service = new TaskFileService(mockVault);
+        mockVault = {
+            create: jest.fn(),
+            read: jest.fn(),
+            adapter: {
+                mkdir: jest.fn()
+            },
+            getAbstractFileByPath: jest.fn()
+        } as any;
+
+        mockMetadataCache = {
+            getFileCache: jest.fn()
+        };
+
+        mockAsanaService = {
+            updateTask: jest.fn()
+        };
+
+        service = new TaskFileService(mockVault, mockMetadataCache, mockAsanaService);
     });
 
     const mockTask: AsanaTask = {
