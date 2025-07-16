@@ -10,7 +10,7 @@ interface AsanaUpdateParams {
 }
 
 export class AsanaService {
-    private client: Asana.Client;
+    private client: Asana.Client | null = null;
 
     constructor(accessToken: string) {
         this.initialize(accessToken);
@@ -18,7 +18,7 @@ export class AsanaService {
 
     private initialize(accessToken: string) {
         if (!accessToken) {
-            console.warn('Asana access token not set');
+            this.client = null;
             return;
         }
 
@@ -27,23 +27,30 @@ export class AsanaService {
                 defaultHeaders: { 'asana-enable': 'new_sections,string_ids' }
             }).useAccessToken(accessToken);
         } catch (error) {
-            console.error('Failed to initialize Asana client:', error);
+            this.client = null;
             throw new Error('Failed to initialize Asana client');
+        }
+    }
+
+    private ensureClient() {
+        if (!this.client) {
+            throw new Error('Asana client not initialized. Please set your API token in settings.');
         }
     }
 
     async getCurrentUser() {
         try {
-            return await this.client.users.me();
+            this.ensureClient();
+            return await this.client!.users.me();
         } catch (error) {
-            console.error('Error fetching current user:', error);
             throw error;
         }
     }
 
     async getProjects(): Promise<AsanaProject[]> {
         try {
-            const workspaces = await this.client.workspaces.findAll();
+            this.ensureClient();
+            const workspaces = await this.client!.workspaces.findAll();
             const workspace = workspaces.data[0];
             if (!workspace) {
                 throw new Error('No workspace found');
@@ -53,7 +60,7 @@ export class AsanaService {
             let offset: string | undefined;
 
             do {
-                const response = await this.client.projects.findAll({
+                const response = await this.client!.projects.findAll({
                     workspace: workspace.gid,
                     limit: 100,
                     ...(offset ? { offset } : {})
@@ -70,32 +77,75 @@ export class AsanaService {
                 notes: p.notes
             }));
         } catch (error) {
-            console.error('Error fetching projects:', error);
             throw error;
         }
     }
 
     async getProject(projectId: string): Promise<AsanaProject> {
         try {
-            const project = await this.client.projects.findById(projectId);
+            this.ensureClient();
+            const project = await this.client!.projects.findById(projectId);
 
             return {
                 gid: project.gid,
                 name: project.name
             };
         } catch (error) {
-            console.error('Error fetching project:', error);
+            throw error;
+        }
+    }
+
+    async getTask(taskId: string): Promise<AsanaTask> {
+        try {
+            this.ensureClient();
+            const task = await this.client!.tasks.findById(taskId, {
+                opt_fields: 'name,notes,due_on,completed,custom_fields,assignee,projects,tags,workspace,permalink_url'
+            });
+
+            return {
+                gid: task.gid,
+                name: task.name,
+                notes: task.notes,
+                due_on: task.due_on,
+                completed: task.completed,
+                custom_fields: task.custom_fields.map((cf: any) => ({
+                    gid: cf.gid,
+                    name: cf.name,
+                    display_value: cf.display_value,
+                    type: cf.type
+                })),
+                assignee: task.assignee ? {
+                    gid: task.assignee.gid,
+                    name: task.assignee.name,
+                    email: task.assignee.email
+                } : null,
+                projects: task.projects.map((p: any) => ({
+                    gid: p.gid,
+                    name: p.name
+                })),
+                tags: task.tags.map((tag: any) => ({
+                    gid: tag.gid,
+                    name: tag.name
+                })),
+                workspace: {
+                    gid: task.workspace.gid,
+                    name: task.workspace.name
+                },
+                permalink_url: task.permalink_url
+            };
+        } catch (error) {
             throw error;
         }
     }
 
     async getTasksForProject(projectId: string): Promise<AsanaTask[]> {
         try {
+            this.ensureClient();
             const allTasks: any[] = [];
             let offset: string | undefined;
 
             do {
-                const response = await this.client.tasks.findByProject(projectId, {
+                const response = await this.client!.tasks.findByProject(projectId, {
                     opt_fields: 'name,notes,due_on,completed,custom_fields,assignee,projects,tags,workspace,permalink_url',
                     limit: 100,
                     ...(offset ? { offset } : {})
@@ -140,27 +190,27 @@ export class AsanaService {
                 permalink_url: t.permalink_url
             }));
         } catch (error) {
-            console.error('Error fetching tasks:', error);
             throw error;
         }
     }
 
     async updateTask(taskId: string, data: AsanaUpdateParams) {
         try {
-            await this.client.tasks.update(taskId, data);
+            this.ensureClient();
+            await this.client!.tasks.update(taskId, data);
         } catch (error) {
-            console.error('Error updating task:', error);
             throw error;
         }
     }
 
     async getTaskComments(taskId: string) {
         try {
+            this.ensureClient();
             const allComments: any[] = [];
             let offset: string | undefined;
 
             do {
-                const stories = await this.client.stories.findByTask(taskId, {
+                const stories = await this.client!.stories.findByTask(taskId, {
                     opt_fields: 'created_by.name,created_at,text,type,resource_subtype',
                     limit: 100,
                     ...(offset ? { offset } : {})
@@ -182,36 +232,35 @@ export class AsanaService {
 
             return allComments.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
         } catch (error) {
-            console.error('Error fetching task comments:', error);
             throw error;
         }
     }
 
     async addComment(taskId: string, text: string) {
         try {
-            await this.client.stories.createOnTask(taskId, {
+            this.ensureClient();
+            await this.client!.stories.createOnTask(taskId, {
                 text: text
             });
         } catch (error) {
-            console.error('Error adding comment:', error);
             throw error;
         }
     }
 
     async getProjectMembers(projectId: string) {
         try {
-            const workspaces = await this.client.workspaces.findAll();
+            this.ensureClient();
+            const workspaces = await this.client!.workspaces.findAll();
             const workspace = workspaces.data[0];
             if (!workspace) {
                 throw new Error('No workspace found');
             }
-            const response = await this.client.users.findByWorkspace(workspace.gid);
+            const response = await this.client!.users.findByWorkspace(workspace.gid);
             return response.data.map((user: any) => ({
                 gid: user.gid,
                 name: user.name
             }));
         } catch (error) {
-            console.error('Error fetching workspace members:', error);
             throw error;
         }
     }
@@ -225,12 +274,13 @@ export class AsanaService {
         priority?: 'high' | 'medium' | 'low';
     }) {
         try {
+            this.ensureClient();
             const taskData: any = {
                 name: data.name,
                 notes: data.notes || '',
                 assignee: data.assigneeId,
                 due_on: data.dueDate,
-                workspace: (await this.client.workspaces.findAll()).data[0].gid
+                workspace: (await this.client!.workspaces.findAll()).data[0].gid
             };
 
             if (data.projectId) {
@@ -238,13 +288,13 @@ export class AsanaService {
             }
 
             // Create the task first
-            const createdTask = await this.client.tasks.create(taskData);
+            const createdTask = await this.client!.tasks.create(taskData);
 
             // If priority is set, update it separately
             if (data.priority && createdTask.gid && data.projectId) {
                 try {
                     // Get the custom fields for the project
-                    const projectResponse: any = await this.client.projects.findById(data.projectId, {
+                    const projectResponse: any = await this.client!.projects.findById(data.projectId, {
                         opt_fields: 'custom_fields,custom_fields.name,custom_fields.enum_options'
                     });
                     
@@ -262,19 +312,18 @@ export class AsanaService {
                             const customFields: { [key: string]: string } = {};
                             customFields[priorityField.gid] = priorityOption.gid;
                             
-                            await this.client.tasks.update(createdTask.gid, {
+                            await this.client!.tasks.update(createdTask.gid, {
                                 custom_fields: customFields
                             });
                         }
                     }
                 } catch (error) {
-                    console.warn('Could not set priority:', error);
                     // Don't fail the whole operation if just priority setting fails
                 }
             }
 
             // Fetch the complete task data including permalink_url
-            const completeTask = await this.client.tasks.findById(createdTask.gid, {
+            const completeTask = await this.client!.tasks.findById(createdTask.gid, {
                 opt_fields: 'name,notes,due_on,completed,custom_fields,assignee,projects,tags,workspace,permalink_url'
             });
 
@@ -311,16 +360,15 @@ export class AsanaService {
                 permalink_url: completeTask.permalink_url
             };
         } catch (error) {
-            console.error('Error creating task:', error);
             throw error;
         }
     }
 
     async deleteTask(taskId: string): Promise<void> {
         try {
-            await this.client.tasks.delete(taskId);
+            this.ensureClient();
+            await this.client!.tasks.delete(taskId);
         } catch (error) {
-            console.error('Error deleting task:', error);
             throw error;
         }
     }

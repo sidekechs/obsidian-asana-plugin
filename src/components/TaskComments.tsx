@@ -107,7 +107,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, asanaService
             const fetchedComments = await asanaService.getTaskComments(taskId);
             setComments(fetchedComments);
         } catch (error) {
-            console.error('Error loading comments:', error);
+            // Error loading comments
         } finally {
             setIsLoading(false);
         }
@@ -126,7 +126,7 @@ export const TaskComments: React.FC<TaskCommentsProps> = ({ taskId, asanaService
             setNewComment('');
             await loadComments();
         } catch (error) {
-            console.error('Error adding comment:', error);
+            // Error adding comment
         } finally {
             setIsSubmitting(false);
         }

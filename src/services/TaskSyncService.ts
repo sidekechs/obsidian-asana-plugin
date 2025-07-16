@@ -47,10 +47,7 @@ export class TaskSyncService {
 
             // Update the local file to reflect any changes
             await this.taskFileService.updateTaskFile(file, taskData);
-
-            console.log('Task synced to Asana:', taskId);
         } catch (error) {
-            console.error('Error syncing task to Asana:', error);
             throw error;
         }
     }

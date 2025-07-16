@@ -4,6 +4,10 @@ export interface AsanaPluginSettings {
     templateFile: string;
     syncInterval: number;
     autoSaveInterval: number; // in seconds, 0 means disabled
+    // Archaeopteryx compatibility settings
+    useArchaeopteryxAPI: boolean;
+    archaeopteryxAPIEndpoint: string;
+    archaeopteryxAccessToken: string;
 }
 
 export const DEFAULT_SETTINGS: AsanaPluginSettings = {
@@ -11,5 +15,9 @@ export const DEFAULT_SETTINGS: AsanaPluginSettings = {
     taskFolder: 'Tasks',
     templateFile: '',
     syncInterval: 5,
-    autoSaveInterval: 0 // disabled by default
+    autoSaveInterval: 0, // disabled by default
+    // Archaeopteryx compatibility
+    useArchaeopteryxAPI: false,
+    archaeopteryxAPIEndpoint: 'https://obsidian-connect-main-ece7e01.zuplo.app',
+    archaeopteryxAccessToken: ''
 };

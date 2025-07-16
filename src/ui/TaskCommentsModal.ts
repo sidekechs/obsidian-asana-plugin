@@ -31,7 +31,7 @@ export class TaskCommentsModal extends Modal {
             this.comments = await this.asanaService.getTaskComments(this.taskId);
             this.render();
         } catch (error) {
-            console.error('Error loading comments:', error);
+            // Error loading comments
         }
     }
 
@@ -104,7 +104,7 @@ export class TaskCommentsModal extends Modal {
                     this.commentInput.setValue('');
                     await this.loadComments();
                 } catch (error) {
-                    console.error('Error adding comment:', error);
+                    // Error adding comment
                 }
             });
 

@@ -43,7 +43,6 @@ export class TaskFileService {
             await this.vault.create(fileName, content);
             return fileName;
         } catch (error) {
-            console.error(`Error creating task file ${fileName}:`, error);
             throw new Error(`Failed to create task file: ${error.message}`);
         }
     }
@@ -111,7 +110,7 @@ export class TaskFileService {
                     return content + template;
                 }
             } catch (error) {
-                console.error('Error reading template file:', error);
+                // Error reading template file
             }
         }
 
@@ -146,7 +145,6 @@ export class TaskFileService {
             
             return result;
         } catch (error) {
-            console.error('Error parsing frontmatter:', error);
             return {};
         }
     }

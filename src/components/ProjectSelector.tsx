@@ -60,7 +60,6 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({ asanaService, 
             } catch (err) {
                 setError('Failed to load projects');
                 setLoading(false);
-                console.error('Error loading projects:', err);
             }
         };
 

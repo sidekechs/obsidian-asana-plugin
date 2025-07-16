@@ -23,6 +23,8 @@ import { AsanaService } from './services/AsanaService';
 import { TaskFileService } from './services/TaskFileService';
 import { TaskSyncQueue } from './services/TaskSyncQueue';
 import { TaskSyncService } from './services/TaskSyncService';
+import { DailyTasksService } from './services/DailyTasksService';
+import { InlineTaskService } from './services/InlineTaskService';
 import { ProjectSelector } from './components/ProjectSelector';
 import { TaskComments } from './components/TaskComments';
 import { ProjectSelectionModal } from './ui/ProjectSelectionModal';
@@ -105,14 +107,19 @@ class CommentsModal extends Modal {
 
 export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
     settings: AsanaPluginSettings;
-    private asanaService: AsanaService;
+    asanaService: AsanaService;
     private taskFileService: TaskFileService;
     private taskSyncQueue: TaskSyncQueue;
     private taskSyncService: TaskSyncService;
+    private dailyTasksService: DailyTasksService;
+    private inlineTaskService: InlineTaskService;
     private syncIntervalId: number | null = null;
 
     async onload() {
         await this.loadSettings();
+
+        // Show development mode notification
+        new Notice('🚀 Asana Plugin (DEV MODE) loaded successfully!', 5000);
 
         // Initialize services
         this.initializeServices();
@@ -135,22 +142,60 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
     }
 
     initializeServices() {
-        this.asanaService = new AsanaService(this.settings.asanaAccessToken);
-        this.taskFileService = new TaskFileService(
-            this.app.vault,
-            this.app.metadataCache,
-            this.asanaService
-        );
-        this.taskSyncQueue = new TaskSyncQueue();
-        this.taskSyncService = new TaskSyncService(
-            this.app.vault,
-            this.asanaService,
-            this.taskFileService
-        );
+        try {
+            this.asanaService = new AsanaService(this.settings.asanaAccessToken);
+            this.taskFileService = new TaskFileService(
+                this.app.vault,
+                this.app.metadataCache,
+                this.asanaService
+            );
+            this.taskSyncQueue = new TaskSyncQueue();
+            this.taskSyncService = new TaskSyncService(
+                this.app.vault,
+                this.asanaService,
+                this.taskFileService
+            );
+            this.dailyTasksService = new DailyTasksService(
+                this.app.vault,
+                this.asanaService
+            );
+            this.inlineTaskService = new InlineTaskService(this.asanaService);
+        } catch (error) {
+            // Services will be initialized when API token is set
+            new Notice('Please configure your Asana API token in settings');
+        }
     }
 
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        
+        // Check for archaeopteryx migration
+        await this.checkArchaeopteryxMigration();
+    }
+
+    async checkArchaeopteryxMigration() {
+        // Check if we need to import archaeopteryx settings
+        if (!this.settings.asanaAccessToken && !this.settings.archaeopteryxAccessToken) {
+            // Try to load archaeopteryx data
+            const archaeopteryxPath = this.app.vault.configDir + '/plugins/archaeopteryx/data.json';
+            try {
+                const archaeopteryxData = await this.app.vault.adapter.read(archaeopteryxPath);
+                const data = JSON.parse(archaeopteryxData);
+                
+                if (data.archaeopteryx_access_token || data.asana_personal_access_token) {
+                    // Import archaeopteryx settings
+                    this.settings.useArchaeopteryxAPI = true;
+                    this.settings.archaeopteryxAPIEndpoint = data.archaeopteryx_api_endpoint || this.settings.archaeopteryxAPIEndpoint;
+                    this.settings.archaeopteryxAccessToken = data.archaeopteryx_access_token || '';
+                    this.settings.asanaAccessToken = data.asana_personal_access_token || '';
+                    
+                    await this.saveSettings();
+                    new Notice('Imported settings from Archaeopteryx plugin');
+                }
+            } catch (error) {
+                // No archaeopteryx data found, that's okay
+            }
+        }
     }
 
     async saveSettings() {
@@ -176,36 +221,101 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
     }
 
     private addCommands() {
+        // Archaeopteryx commands
+        // Get Daily Tasks command
+        this.addCommand({
+            id: 'archaeopteryx-get-daily-tasks',
+            name: 'Get Daily Tasks',
+            hotkeys: [{ modifiers: ['Alt', 'Shift'], key: 'd' }],
+            callback: async () => {
+                if (!this.dailyTasksService) {
+                    new Notice('Please configure your Asana API token in settings');
+                    return;
+                }
+                try {
+                    const notice = new Notice('Fetching daily tasks...', 0);
+                    const tasks = await this.dailyTasksService.fetchDailyTasks();
+                    const file = await this.dailyTasksService.createDailyTasksNote(tasks);
+                    notice.hide();
+                    
+                    new Notice(`Daily tasks loaded: ${tasks.length} tasks found`);
+                    
+                    // Open the daily tasks file
+                    await this.app.workspace.getLeaf().openFile(file);
+                } catch (error) {
+                    new Notice('Failed to fetch daily tasks: ' + error.message);
+                }
+            }
+        });
+
+        // Save Task command
+        this.addCommand({
+            id: 'archaeopteryx-save-task',
+            name: 'Save Task',
+            hotkeys: [{ modifiers: ['Alt', 'Shift'], key: 's' }],
+            editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView) => {
+                if (!this.inlineTaskService) return false;
+                const task = this.inlineTaskService.getTaskAtCursor(editor);
+                if (task) {
+                    if (!checking) {
+                        this.inlineTaskService.saveTask(editor, view)
+                            .then(() => new Notice('Task saved to Asana'))
+                            .catch(err => new Notice('Failed to save task: ' + err.message));
+                    }
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        // Complete Task command
+        this.addCommand({
+            id: 'archaeopteryx-complete-task',
+            name: 'Complete Task',
+            hotkeys: [{ modifiers: ['Alt', 'Shift'], key: 'c' }],
+            editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView) => {
+                if (!this.inlineTaskService) return false;
+                const task = this.inlineTaskService.getTaskAtCursor(editor);
+                if (task) {
+                    if (!checking) {
+                        this.inlineTaskService.completeTask(editor, view)
+                            .then(() => new Notice('Task marked as complete'))
+                            .catch(err => new Notice('Failed to complete task: ' + err.message));
+                    }
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        // Update Task command
+        this.addCommand({
+            id: 'archaeopteryx-update-task',
+            name: 'Update Task',
+            hotkeys: [{ modifiers: ['Alt', 'Shift'], key: 'u' }],
+            editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView) => {
+                if (!this.inlineTaskService) return false;
+                const task = this.inlineTaskService.getTaskAtCursor(editor);
+                if (task && task.gid) {
+                    if (!checking) {
+                        this.inlineTaskService.saveTask(editor, view)
+                            .then(() => new Notice('Task updated in Asana'))
+                            .catch(err => new Notice('Failed to update task: ' + err.message));
+                    }
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        // Original commands (keeping these for compatibility)
         // Create task from selection command
         this.addCommand({
             id: 'create-task-from-selection',
-            name: 'Create Task from Selection',
-            editorCallback: (editor) => {
-                const selectedText = editor.getSelection();
-                console.log('Raw selected text:', JSON.stringify(selectedText));
-                console.log('Selection length:', selectedText.length);
-                console.log('Selection lines:', selectedText.split('\n').length);
-
-                if (!selectedText) {
-                    new Notice('Please select some text first');
-                    return;
-                }
-
-                this.createTask(selectedText);
-            }
-        });
-
-        // Create task from current line command
-        this.addCommand({
-            id: 'create-task-from-line',
-            name: 'Create Asana task from current line',
+            name: 'Create Asana task from selection',
             hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'a' }],
             editorCallback: (editor) => {
                 const selectedText = editor.getSelection();
-                console.log('Raw selected text:', JSON.stringify(selectedText));
-                console.log('Selection length:', selectedText.length);
-                console.log('Selection lines:', selectedText.split('\n').length);
-
                 if (!selectedText) {
                     new Notice('Please select some text first');
                     return;
@@ -215,20 +325,13 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
             }
         });
 
-        // Command to create a new task
+        // Command to create a new task (opens modal)
         this.addCommand({
             id: 'create-task',
             name: 'Create Task',
             editorCallback: (editor: Editor) => {
                 const selectedText = editor.getSelection();
-                new ProjectSelectionModal(
-                    this.app,
-                    this.asanaService,
-                    this.taskFileService,
-                    this.settings,
-                    selectedText,
-                    () => {}
-                ).open();
+                this.createTask(selectedText);
             }
         });
 
@@ -248,13 +351,12 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                             await this.taskSyncService.syncTaskToAsana(file);
                             syncCount++;
                         } catch (error) {
-                            console.error(`Error syncing task ${file.path}:`, error);
+                            // Error syncing task
                         }
                     }
                     
                     new Notice(`Successfully synced ${syncCount} tasks`);
                 } catch (error) {
-                    console.error('Error syncing all tasks:', error);
                     new Notice('Failed to sync tasks');
                 }
             }
@@ -289,16 +391,11 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                 new Notice('No Asana link found for this task');
             }
         } catch (error) {
-            console.error('Error opening task in Asana:', error);
             new Notice('Failed to open task in Asana');
         }
     }
 
     private async createTask(content: string) {
-        console.log('Creating task with raw content:', JSON.stringify(content));
-        console.log('Content length:', content.length);
-        console.log('Content lines:', content.split('\n').length);
-
         if (!this.asanaService) {
             new Notice('Please configure your Asana API token first.');
             return;
@@ -359,7 +456,6 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                 });
             }
         } catch (error) {
-            console.error('Error handling file rename:', error);
             new Notice('Failed to update task name in Asana');
         }
     }
@@ -372,7 +468,6 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
                 await this.asanaService.deleteTask(frontmatter.asana_gid);
             }
         } catch (error) {
-            console.error('Error handling file delete:', error);
             new Notice('Failed to delete task in Asana');
         }
     }
@@ -381,7 +476,7 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
         try {
             await this.taskSyncQueue.processNext();
         } catch (error) {
-            console.error('Error syncing task:', error);
+            // Error syncing task
         }
     }
 
@@ -394,7 +489,6 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
             const projects = await this.asanaService.getProjects();
             return projects;
         } catch (error) {
-            console.error('Error fetching projects:', error);
             throw error;
         }
     }
@@ -415,7 +509,6 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
             await this.taskFileService.saveTask(activeFile);
             new Notice('Task saved to Asana');
         } catch (error) {
-            console.error('Error saving task:', error);
             new Notice('Failed to save task to Asana: ' + error.message);
         }
     }
@@ -425,7 +518,6 @@ export default class AsanaPlugin extends Plugin implements IAsanaPlugin {
             await this.taskFileService.syncTask(file);
             new Notice('Task updated in Asana');
         } catch (error) {
-            console.error('Error updating task:', error);
             new Notice('Failed to update task in Asana');
             throw error;
         }

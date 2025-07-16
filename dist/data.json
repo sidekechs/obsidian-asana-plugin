@@ -1,0 +1,10 @@
+{
+  "asanaAccessToken": "2/1197755235692064/1207682990363690:bb58bac8a75afb287e307ea9fb7bc3af",
+  "taskFolder": "Tasks",
+  "templateFile": "",
+  "syncInterval": 5,
+  "autoSaveInterval": 0,
+  "useArchaeopteryxAPI": true,
+  "archaeopteryxAPIEndpoint": "https://obsidian-connect-main-ece7e01.zuplo.app",
+  "archaeopteryxAccessToken": "zpka_e51391e85f904ad6b7bcba827b905a2d_36435514"
+}
